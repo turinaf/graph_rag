@@ -1,0 +1,1 @@
+"""Link prediction module initialization."""

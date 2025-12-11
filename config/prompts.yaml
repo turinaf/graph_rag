@@ -1,0 +1,87 @@
+# Prompts used in the RAG system
+
+chunking_prompt: |
+  You are required to act as an AI annotator and extract the Chunks embedded in the sentences of the provided paragraph text. Below, you will be given a paragraph from a text. You need to break it down sentence by sentence and extract the Chunks embedded in each sentence.
+  
+  The extracted Chunks can be an idea, argument, or fact. Each sentence may contain one or more Chunks to be extracted. The extracted Chunks should be as granular as possible to ensure they cannot be further broken down.
+  
+  When extracting Chunks from a sentence, pay attention to the context within the paragraph. Replace pronouns with the nouns they represent and complete any omitted sentence components to ensure the independence of the Chunks is not compromised. This means that each extracted Chunk should not contain pronouns whose referents cannot be found within that Chunk.
+  
+  Below is an example interaction that can serve as a reference for format and method of extracting Chunks:
+  
+  System's Input:
+  [The Start of Paragraph text]
+  Pakistan Super League (Urdu: PSL) is a Twenty20 cricket league, founded in Lahore on 9 September 2015 with five teams and now comprises six teams. Instead of operating as an association of independently owned teams, the league is a single entity in which each franchise is owned and controlled by investors.
+  [The End of Paragraph text]
+  
+  Your Answer:
+  [Sentence 1]
+  Pakistan Super League (Urdu: PSL) is a Twenty20 cricket league, founded in Lahore on 9 September 2015 with five teams and now comprises six teams.
+  [Extracted Chunks in Sentence 1]
+  [Pakistan Super League (PSL) is a Twenty20 cricket league.]
+  [Pakistan Super League (PSL) was founded in Lahore on 9 September 2015.]
+  [Pakistan Super League (PSL) was founded with five teams.]
+  [Pakistan Super League (PSL) now comprises six teams.]
+  [Sentence 2]
+  Instead of operating as an association of independently owned teams, the league is a single entity in which each franchise is owned and controlled by investors.
+  [Extracted Chunks in Sentence 2]
+  [Pakistan Super League (PSL) does not operate as an association of independently owned teams.]
+  [Pakistan Super League (PSL) operates as a single entity.]
+  [Each franchise in the Pakistan Super League (PSL) is owned by investors.]
+  [Each franchise in the Pakistan Super League (PSL) is controlled by investors.]
+  
+  Now extract chunks from this text:
+  [The Start of Paragraph text]
+  {text}
+  [The End of Paragraph text]
+
+synthetic_query_prompt: |
+  You are required to act as an AI annotator and generate questions from the provided paragraph chunks. Below, you will be given a bag of chunks from a paragraph. You need to generate two questions for each chunk. The generated questions need to be like human-made questions. The questions should be as similar as possible to human questions.
+  
+  When generating the two questions from a chunk, pay attention to the context within the chunk.
+  
+  Below is an example interaction that can serve as a reference for format and method of generating questions:
+  
+  System's Input:
+  [The Start bag of chunks]
+  [Chunk 1]
+  We propose a model-based reinforcement learning (MBRL) approach for continuous action spaces.
+  [Chunk 2]
+  Bthardamz is only accessible during the quest The Only Cure.
+  [The End bag of chunks]
+  
+  Your Answer:
+  [Questions Chunk 1]
+  [What type of reinforcement learning approach was proposed?]
+  [What type of action spaces does the proposed approach target?]
+  [Questions Chunk 2]
+  [When can Bthardamz be accessed?]
+  [What quest must be completed to access Bthardamz?]
+  
+  Now generate questions for these chunks:
+  [The Start bag of chunks]
+  {chunks}
+  [The End bag of chunks]
+
+qa_prompt: |
+  You are a precise assistant answering questions based on retrieved information.
+  Below are information chunks and a question. Answer the question using ONLY the information in the chunks.
+  
+  IMPORTANT: Give the shortest possible answer - just the essential fact, name, date, or yes/no. Do NOT write full sentences unless absolutely necessary.
+  
+  If the answer isn't in the chunks, respond with: "I don't know."
+  
+  [Information chunks]
+  {chunks}
+  
+  [Question]
+  {query}
+  
+  Answer (be as brief as possible):
+
+hyde_prompt: |
+  Please write a passage to answer the question. The passage should be detailed and informative.
+  
+  Question: {query}
+  
+  Passage:

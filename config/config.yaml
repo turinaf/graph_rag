@@ -1,0 +1,103 @@
+# RAG Benchmarking System Configuration
+
+# LLM Configuration (Local endpoint on port 8078)
+llm:
+  provider: "openai"  # OpenAI-style API
+  model_name: "qwen-vlm"  # Model name for local LLM
+  temperature: 0
+  max_tokens: 4096
+  api_base_url: "http://localhost:8078/v1"  # Local LLM endpoint
+  timeout: 120
+
+# Embedding Configuration (Docker container - vLLM)
+embedding:
+  provider: "vllm"  # vLLM embedding service
+  api_url: "http://localhost:8071/v1/embeddings"  # Docker embedder endpoint
+  model_name: "qwen-embedding"
+  batch_size: 32
+  max_length: 512
+  timeout: 60
+
+# Dataset Configuration
+dataset:
+  name: "hotpotqa"
+  version: "fullwiki"
+  sample_size: 100  # Number of documents for HotpotQA-S (paper uses larger samples)
+  random_seed: 42
+  cache_dir: "./data/raw"
+  max_questions: 100  # Evaluate on 100 questions for statistical significance
+  filter_mode: "support_only"  # Require all supporting docs to be present (paper-like)
+
+# Chunking Configuration
+chunking:
+  method: "simple"  # Use simple chunking for reproducibility (paper baseline)
+  use_prompts: false
+  batch_size: 5  # Batch documents for chunking
+  max_chunk_size: 2048  # Max characters per chunk (~512 tokens as per paper)
+
+# Graph Construction (SOTA)
+graph:
+  similarity_metric: "cosine"
+  k_neighbors: 10  # Base k for k-NN graph construction
+  similarity_threshold: 0.3  # Minimum similarity for edges
+  mutual_knn: false  # Use standard k-NN (not mutual) for denser graph
+  adaptive_k: true  # Adapt k based on local density (SOTA)
+  min_k: 3  # Minimum neighbors in dense regions
+  max_k: 20  # Maximum neighbors in sparse regions
+
+# Retrieval Configuration
+retrieval:
+  top_k: 5  # Default chunks to retrieve
+  confidence_threshold: 0.3  # For LP-RAG probability filtering (lowered)
+  max_tokens: 4000  # Default maximum context tokens for generation
+  # Method-specific token budgets (from paper benchmarks)
+  method_token_budgets:
+    naive_rag: 7200  # NaiveRAG: ~7.2k tokens
+    hyde: 7300  # HyDE: ~7.3k tokens
+    hyde_sota: 7300  # HyDE SOTA: same budget
+    graphrag: 6100  # GraphRAG: ~6.1k tokens
+    graphrag_sota: 6100  # GraphRAG SOTA: same budget
+    lightrag: 5400  # LightRAG: ~5.4k tokens
+    node_rag: 4000  # NodeRAG: ~4.0k tokens (most efficient)
+    node_rag_sota: 4000  # NodeRAG SOTA: same budget
+    lp_rag: 3200  # LP-RAG: ~3.2k tokens (hyper-efficient)
+
+# HyDE SOTA Configuration
+hyde:
+  num_hypotheses: 3  # Generate 3 diverse hypotheses
+  temperature: 0.7  # Temperature for diversity
+
+# GraphRAG SOTA Configuration
+graphrag:
+  use_summarization: true  # Generate community summaries
+  hierarchy_levels: 2  # Hierarchical community structure
+
+# NodeRAG SOTA Configuration
+noderag:
+  extract_entities: true  # Extract and link entities
+  use_heterogeneous: true  # Build heterogeneous graph
+
+# Link Prediction (for LP-RAG)
+link_prediction:
+  method: "common_neighbors"  # Options: common_neighbors, jaccard, adamic_adar, ch3_l3_placeholder
+  normalize_scores: true
+
+# Synthetic Query Generation (for LP-RAG)
+synthetic_queries:
+  enabled: true
+  queries_per_chunk: 2
+  include_multihop: true
+
+# Benchmarking
+benchmark:
+  methods: ["naive_rag", "hyde", "graphrag", "lightrag", "node_rag", "lp_rag"]
+  metrics: ["accuracy", "f1", "token_count", "retrieval_time"]
+  save_results: true
+  output_dir: "./data/results"
+  use_llm_judge: false  # set true to enable LLM-as-judge evaluation (paper baseline typically false)
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  file: "./logs/benchmark.log"
+  console: true
