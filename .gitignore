@@ -7,3 +7,6 @@ src/link_prediction/__pycache__
 __pycache__/
 
 data/
+*.env
+*.log
+*.fish

@@ -16,7 +16,7 @@ embedding:
   api_url: "${LLM_API_BASE}"  # Docker embedder endpoint
   model_name: "${EMBEDDING_MODEL_NAME}"
   batch_size: 32
-  max_length: 512
+  max_length: 2048
   timeout: 60
 
 # Dataset Configuration
