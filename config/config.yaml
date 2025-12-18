@@ -3,17 +3,18 @@
 # LLM Configuration (Local endpoint on port 8078)
 llm:
   provider: "openai"  # OpenAI-style API
-  model_name: "qwen-vlm"  # Model name for local LLM
+  model_name: "${LLM_MODEL_NAME}"  # Model name for local LLM
   temperature: 0
   max_tokens: 4096
-  api_base_url: "http://localhost:8078/v1"  # Local LLM endpoint
+  api_base_url: "${LLM_API_BASE}"  # Local LLM endpoint
+  api_key: "${LLM_API_KEY}"
   timeout: 120
 
 # Embedding Configuration (Docker container - vLLM)
 embedding:
-  provider: "vllm"  # vLLM embedding service
-  api_url: "http://localhost:8071/v1/embeddings"  # Docker embedder endpoint
-  model_name: "qwen-embedding"
+  provider: "openai"  # vLLM embedding service
+  api_url: "${LLM_API_BASE}"  # Docker embedder endpoint
+  model_name: "${EMBEDDING_MODEL_NAME}"
   batch_size: 32
   max_length: 512
   timeout: 60
@@ -35,15 +36,16 @@ chunking:
   batch_size: 5  # Batch documents for chunking
   max_chunk_size: 2048  # Max characters per chunk (~512 tokens as per paper)
 
-# Graph Construction (SOTA)
+# Graph Construction (SOTA - Enhanced)
 graph:
   similarity_metric: "cosine"
-  k_neighbors: 10  # Base k for k-NN graph construction
-  similarity_threshold: 0.3  # Minimum similarity for edges
-  mutual_knn: false  # Use standard k-NN (not mutual) for denser graph
+  k_neighbors: 20  # Increased from 10 to 20 for better connectivity
+  similarity_threshold: 0.2  # Lowered for better graph connectivity
+  mutual_knn: true  # Use mutual k-NN as per paper Eq. (5)
   adaptive_k: true  # Adapt k based on local density (SOTA)
-  min_k: 3  # Minimum neighbors in dense regions
-  max_k: 20  # Maximum neighbors in sparse regions
+  min_k: 5  # Increased minimum neighbors
+  max_k: 50  # Increased maximum neighbors for better connectivity
+  use_leiden: true  # Use Leiden algorithm for community detection
 
 # Retrieval Configuration
 retrieval:
