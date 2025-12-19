@@ -11,8 +11,8 @@ Implements state-of-the-art graph construction:
 
 import networkx as nx
 import numpy as np
-from typing import List, Dict, Tuple, Optional
 import logging
+from typing import List, Dict, Tuple, Optional
 from sklearn.neighbors import NearestNeighbors
 from collections import defaultdict
 
@@ -198,39 +198,137 @@ class GraphBuilder:
         self,
         chunk_graph: nx.Graph,
         synthetic_queries: List[Dict],
-        query_embeddings: np.ndarray
+        query_embeddings: np.ndarray,
+        encoder = None  # optional encoder to re-embed if dims mismatch
     ) -> nx.Graph:
         """
-        Build chunk-query graph for LP-RAG.
+        Build a heterogeneous chunk-query graph. Ensures embeddings are compatible.
 
-        Args:
-            chunk_graph: Existing chunk-chunk graph
-            synthetic_queries: List of {query_id, text, chunk_id}
-            query_embeddings: Query embeddings
-
-        Returns:
-            NetworkX graph with both chunks and queries
+        If query_embeddings have a different dimensionality than chunk node embeddings,
+        and an encoder is provided, synthetic queries will be re-encoded with that encoder
+        to match chunk embeddings. If no encoder is provided, a clear error is raised.
         """
-        logger.info(f"Adding {len(synthetic_queries)} query nodes to graph...")
+        logger.info(f"Building query-chunk knowledge graph with {len(synthetic_queries)} query nodes...")
 
-        # Copy chunk graph
-        G = chunk_graph.copy()
+        G = chunk_graph.copy() if chunk_graph is not None else nx.Graph()
 
-        # Add query nodes and connect to their source chunks
+        # Try to get chunk nodes with embeddings, or fall back to all nodes
+        chunk_nodes_with_emb = [n for n, d in G.nodes(data=True) if d.get('node_type') == 'chunk' and 'embedding' in d]
+        
+        if chunk_nodes_with_emb:
+            # Case 1: Chunk nodes already have embeddings as attributes
+            chunk_nodes = chunk_nodes_with_emb
+            chunk_embeddings = np.array([G.nodes[n]['embedding'] for n in chunk_nodes])
+        else:
+            # Case 2: No embeddings in graph nodes - need to reconstruct from external data
+            # Get all chunk nodes (assume they are the non-query nodes)
+            all_nodes = list(G.nodes())
+            chunk_nodes = [n for n in all_nodes if not str(n).startswith('query_')]
+            
+            if not chunk_nodes:
+                logger.warning("No chunk nodes found in graph. Creating empty graph with query nodes only.")
+                chunk_embeddings = np.empty((0, 384))  # Default embedding dim
+                chunk_nodes = []
+            else:
+                # We need external embeddings - this should be passed or reconstructed
+                # For now, we'll need to get embeddings from the chunks data
+                logger.info(f"Found {len(chunk_nodes)} chunk nodes without embeddings. Need to reconstruct from external data.")
+                
+                # This is a limitation - we need the original chunks and embeddings
+                # For now, create a minimal working version
+                if encoder is not None:
+                    # Try to get chunk texts from node attributes
+                    chunk_texts = []
+                    for node in chunk_nodes:
+                        node_data = G.nodes[node]
+                        text = node_data.get('text', node_data.get('chunk_text', f"chunk_{node}"))
+                        chunk_texts.append(text)
+                    
+                    logger.info("Re-encoding chunk texts with provided encoder...")
+                    chunk_embeddings = encoder.encode(chunk_texts)
+                    
+                    # Store embeddings in graph nodes for future use
+                    for i, node in enumerate(chunk_nodes):
+                        G.nodes[node]['embedding'] = chunk_embeddings[i]
+                        G.nodes[node]['node_type'] = 'chunk'
+                else:
+                    raise ValueError(
+                        "No chunk nodes with embeddings found in chunk_graph and no encoder provided. "
+                        "Either ensure chunk nodes have 'embedding' attributes or provide an encoder to reconstruct embeddings."
+                    )
+
+        if chunk_embeddings.ndim != 2:
+            raise ValueError("Chunk embeddings must be a 2D array (n_chunks, dim).")
+
+        chunk_dim = chunk_embeddings.shape[1]
+
+        # Ensure query_embeddings is a 2D array
+        if query_embeddings is None or len(query_embeddings) == 0:
+            # try to re-encode if encoder available
+            if encoder is None:
+                raise ValueError("query_embeddings are missing and no encoder provided to compute them.")
+            query_texts = [q['text'] for q in synthetic_queries]
+            query_embeddings = encoder.encode(query_texts)
+        else:
+            query_embeddings = np.asarray(query_embeddings)
+            if query_embeddings.ndim == 1:
+                query_embeddings = query_embeddings.reshape(1, -1)
+
+        # If dims mismatch, try to re-encode synthetic queries with provided encoder
+        if query_embeddings.shape[1] != chunk_dim:
+            if encoder is not None:
+                logger.warning(
+                    "Synthetic query embeddings dimension (%d) does not match chunk embedding dimension (%d). "
+                    "Re-encoding synthetic queries with provided encoder to align dimensions.",
+                    query_embeddings.shape[1], chunk_dim
+                )
+                query_texts = [q['text'] for q in synthetic_queries]
+                query_embeddings = encoder.encode(query_texts)
+            else:
+                raise ValueError(
+                    f"Embedding dimension mismatch: queries {query_embeddings.shape[1]} vs chunks {chunk_dim}. "
+                    "Provide an encoder to re-encode synthetic queries or rebuild embeddings with a consistent model."
+                )
+
+        # Final check
+        if query_embeddings.shape[1] != chunk_dim:
+            raise ValueError(
+                f"Unable to align embedding dimensions after re-encoding: queries {query_embeddings.shape[1]} vs chunks {chunk_dim}."
+            )
+
+        # Config for query->chunk connections
+        qc_cfg = self.config.get('query_chunk_graph', {})
+        sim_threshold = float(qc_cfg.get('similarity_threshold', 0.25))
+        max_connections = int(qc_cfg.get('max_connections_per_query', 10))
+
+        # Add query nodes and create similarity-based edges
         for i, query in enumerate(synthetic_queries):
-            query_id = f"query_{query['query_id']}"
-
+            q_node = f"query_{query['query_id']}"
+            q_emb = query_embeddings[i]
             G.add_node(
-                query_id,
+                q_node,
                 query_id=query['query_id'],
                 text=query['text'],
                 node_type='query',
-                embedding=query_embeddings[i]
+                embedding=q_emb
             )
 
-            # Connect query to its source chunk
-            source_chunk_id = query['chunk_id']
-            G.add_edge(query_id, source_chunk_id, weight=1.0)
+            if len(chunk_nodes) == 0:
+                continue
 
-        logger.info(f"Chunk-query graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+            # Compute similarities (assuming normalized embeddings; dot = cosine)
+            sims = chunk_embeddings.dot(q_emb)
+            pairs = list(zip(chunk_nodes, sims))
+            pairs.sort(key=lambda x: x[1], reverse=True)
+            # Apply threshold and limit
+            pairs = [(nid, float(s)) for nid, s in pairs if s >= sim_threshold][:max_connections]
+
+            for chunk_id, sim in pairs:
+                weight = 1.0 if chunk_id == query['chunk_id'] else float(sim)
+                G.add_edge(q_node, chunk_id, weight=weight)
+
+        logger.info(
+            "Built chunk-query graph: nodes=%d edges=%d",
+            G.number_of_nodes(), G.number_of_edges()
+        )
         return G

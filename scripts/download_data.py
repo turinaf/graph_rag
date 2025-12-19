@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import yaml
-from src.data.loader import HotpotQALoader
+from src.preprocess.loader import HotpotQALoader
 from src.utils.logger import setup_logger
 
 def main():

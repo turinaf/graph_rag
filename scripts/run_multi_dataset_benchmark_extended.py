@@ -19,7 +19,7 @@ from typing import Dict, List
 import yaml
 import numpy as np
 
-from src.data.multi_dataset_loader import MultiDatasetLoader
+from src.preprocess.multi_dataset_loader import MultiDatasetLoader
 from src.embeddings.encoder import EmbeddingEncoder
 from src.graph.builder import GraphBuilder
 from src.generation.llm import LLMClient

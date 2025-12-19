@@ -50,9 +50,26 @@ class LPRAG(BaseRetriever):
         self.chunks = {c['chunk_id']: c for c in chunks}
         self.embeddings = embeddings
         self.graph = graph
-        logger.info(
-            f"LP-RAG indexed {len(chunks)} chunks; graph_nodes={graph.number_of_nodes() if graph else 0}"
-        )
+        # Validate embedding dimensionality vs graph node embeddings (if present)
+        try:
+            if embeddings is not None and embeddings.ndim == 2 and graph is not None:
+                emb_dim = embeddings.shape[1]
+                # Check a sample of graph node embeddings
+                mismatched = []
+                for n, d in graph.nodes(data=True):
+                    e = d.get('embedding')
+                    if e is not None and len(e) != emb_dim:
+                        mismatched.append((n, len(e)))
+                        break
+                if mismatched:
+                    logger.warning(
+                        "Detected embedding dimension mismatch between provided embeddings (%d) and graph node '%s' (%d). "
+                        "This can cause dot-product / similarity errors at retrieval. Rebuild graph or embeddings to match.",
+                        emb_dim, mismatched[0][0], mismatched[0][1]
+                    )
+        except Exception:
+            # keep indexing but warn
+            logger.exception("Error while validating embedding dimensions during indexing.")
     
     def retrieve(self, query: str) -> List[Dict]:
         """
