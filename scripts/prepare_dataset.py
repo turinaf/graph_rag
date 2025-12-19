@@ -17,8 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import yaml
 import numpy as np
-from src.data.loader import HotpotQALoader
-from src.data.chunker import LLMChunker, simple_chunker
+from src.preprocess.loader import HotpotQALoader
+from src.preprocess.chunker import LLMChunker, simple_chunker
 from src.embeddings.encoder import EmbeddingEncoder
 from src.graph.builder import GraphBuilder
 from src.generation.llm import LLMClient

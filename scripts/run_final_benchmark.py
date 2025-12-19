@@ -24,7 +24,7 @@ from collections import defaultdict
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.data.multi_dataset_loader import MultiDatasetLoader
+from src.preprocess.multi_dataset_loader import MultiDatasetLoader
 from src.embeddings.encoder import EmbeddingEncoder
 from src.graph.builder import GraphBuilder
 from src.retrieval.naive_rag import NaiveRAG

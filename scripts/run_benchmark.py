@@ -26,7 +26,7 @@ else:
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import yaml
-from src.data.loader import HotpotQALoader
+from src.preprocess.loader import HotpotQALoader
 from src.embeddings.encoder import EmbeddingEncoder
 from src.generation.llm import LLMClient
 from src.retrieval.naive_rag import NaiveRAG

@@ -1,0 +1,351 @@
+"""
+Multi-dataset loader with unified interface.
+
+Supports: HotpotQA, MuSiQue, MultiHop-RAG, RAG-QA, ICLR
+Handles context window limitations for embeddings and LLM.
+"""
+
+import json
+import logging
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
+import re
+
+logger = logging.getLogger(__name__)
+
+
+class MultiDatasetLoader:
+    """
+    Unified loader for multiple multi-hop QA datasets.
+    
+    Context window handling:
+    - Max chunk size: 2048 chars (~512 tokens)
+    - Max document: 8192 chars (~2048 tokens)
+    - Embedding limit: 8192 tokens (qwen-embedding)
+    - LLM limit: 32768 tokens (Qwen-VLM)
+    """
+    
+    def __init__(self, data_dir: str = "data"):
+        self.data_dir = Path(data_dir)
+        self.max_chunk_size = 2048  # chars
+        self.max_doc_size = 8192  # chars
+    
+    def load_dataset(self, dataset_name: str, split: str = "validation", 
+                    max_samples: Optional[int] = None) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Load dataset by name.
+        
+        Args:
+            dataset_name: One of 'hotpotqa', 'hotpotqa_full', 'musique', 'multihop', 'ragqa', 'iclr'
+            split: Data split (train/validation/test)
+            max_samples: Limit number of samples
+            
+        Returns:
+            (documents, questions) tuple
+        """
+        loader_map = {
+            'hotpotqa': self._load_hotpotqa,
+            'hotpotqa_full': self._load_hotpotqa_full,
+            'musique': self._load_musique,
+            'multihop': self._load_multihop_rag,
+            'ragqa': self._load_ragqa,
+            'iclr': self._load_iclr,
+        }
+        
+        if dataset_name not in loader_map:
+            raise ValueError(f"Unknown dataset: {dataset_name}")
+        
+        logger.info(f"Loading {dataset_name} ({split}, max_samples={max_samples})...")
+        return loader_map[dataset_name](split, max_samples)
+    
+    def _load_hotpotqa(self, split: str, max_samples: Optional[int]) -> Tuple[List[Dict], List[Dict]]:
+        """Load HotpotQA-Small (existing)."""
+        docs_path = self.data_dir / "raw" / "processed" / "documents.json"
+        questions_path = self.data_dir / "raw" / "processed" / "questions.json"
+        
+        if not docs_path.exists() or not questions_path.exists():
+            raise FileNotFoundError(f"HotpotQA data not found in {self.data_dir / 'raw' / 'processed'}")
+        
+        with open(docs_path) as f:
+            documents = json.load(f)
+        with open(questions_path) as f:
+            questions = json.load(f)
+        
+        if max_samples:
+            questions = questions[:max_samples]
+        
+        logger.info(f"Loaded HotpotQA: {len(documents)} docs, {len(questions)} questions")
+        return documents, questions
+    
+    def _load_hotpotqa_full(self, split: str, max_samples: Optional[int]) -> Tuple[List[Dict], List[Dict]]:
+        """Load full HotpotQA validation set."""
+        raw_file = self.data_dir / "HotpotQA" / "raw" / "hotpot_dev_distractor_v1.json"
+        
+        if not raw_file.exists():
+            raise FileNotFoundError(f"Full HotpotQA not found: {raw_file}")
+        
+        with open(raw_file) as f:
+            data = json.load(f)
+        
+        # Extract documents and questions
+        doc_map = {}
+        questions = []
+        
+        for item in data:
+            if max_samples and len(questions) >= max_samples:
+                break
+            
+            # Extract question
+            question = {
+                'question_id': item['_id'],
+                'question': item['question'],
+                'answer': item['answer'],
+                'type': item['type'],
+                'supporting_facts': item.get('supporting_facts', [])
+            }
+            questions.append(question)
+            
+            # Extract context documents
+            for doc_title, doc_sentences in item['context']:
+                if doc_title not in doc_map:
+                    # Truncate long documents
+                    full_text = ' '.join(doc_sentences)
+                    if len(full_text) > self.max_doc_size:
+                        full_text = full_text[:self.max_doc_size]
+                    
+                    doc_map[doc_title] = {
+                        'doc_id': f"hotpot_{len(doc_map)}",
+                        'title': doc_title,
+                        'text': full_text
+                    }
+        
+        documents = list(doc_map.values())
+        logger.info(f"Loaded HotpotQA Full: {len(documents)} docs, {len(questions)} questions")
+        return documents, questions
+    
+    def _load_musique(self, split: str, max_samples: Optional[int]) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Load MuSiQue dataset.
+        
+        MuSiQue format:
+        - question: str
+        - answer: str
+        - paragraphs: List[{title, paragraph_text}]
+        - answer_aliases: List[str]
+        """
+        musique_file = self.data_dir / "musique" / f"{split}.json"
+        
+        if not musique_file.exists():
+            logger.warning(f"MuSiQue not found: {musique_file}")
+            return self._create_dummy_dataset("musique", max_samples or 50)
+        
+        with open(musique_file) as f:
+            data = json.load(f)
+        
+        doc_map = {}
+        questions = []
+        
+        for item in data:
+            if max_samples and len(questions) >= max_samples:
+                break
+            
+            # Extract question
+            question = {
+                'question_id': item.get('id', f"musique_{len(questions)}"),
+                'question': item['question'],
+                'answer': item['answer'],
+                'answer_aliases': item.get('answer_aliases', [])
+            }
+            questions.append(question)
+            
+            # Extract paragraphs
+            for para in item.get('paragraphs', []):
+                title = para.get('title', f"doc_{len(doc_map)}")
+                text = para.get('paragraph_text', '')
+                
+                if title not in doc_map and text:
+                    if len(text) > self.max_doc_size:
+                        text = text[:self.max_doc_size]
+                    
+                    doc_map[title] = {
+                        'doc_id': f"musique_{len(doc_map)}",
+                        'title': title,
+                        'text': text
+                    }
+        
+        documents = list(doc_map.values())
+        logger.info(f"Loaded MuSiQue: {len(documents)} docs, {len(questions)} questions")
+        return documents, questions
+    
+    def _load_multihop_rag(self, split: str, max_samples: Optional[int]) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Load MultiHop-RAG dataset.
+        
+        Format: similar to HotpotQA
+        """
+        multihop_file = self.data_dir / "multihop" / f"{split}.json"
+        
+        if not multihop_file.exists():
+            logger.warning(f"MultiHop-RAG not found: {multihop_file}")
+            return self._create_dummy_dataset("multihop", max_samples or 50)
+        
+        with open(multihop_file) as f:
+            data = json.load(f)
+        
+        doc_map = {}
+        questions = []
+        
+        for item in data:
+            if max_samples and len(questions) >= max_samples:
+                break
+            
+            question = {
+                'question_id': item.get('_id', f"multihop_{len(questions)}"),
+                'question': item['question'],
+                'answer': item['answer']
+            }
+            questions.append(question)
+            
+            for doc_title, doc_text in item.get('context', []):
+                if doc_title not in doc_map:
+                    if isinstance(doc_text, list):
+                        doc_text = ' '.join(doc_text)
+                    if len(doc_text) > self.max_doc_size:
+                        doc_text = doc_text[:self.max_doc_size]
+                    
+                    doc_map[doc_title] = {
+                        'doc_id': f"multihop_{len(doc_map)}",
+                        'title': doc_title,
+                        'text': doc_text
+                    }
+        
+        documents = list(doc_map.values())
+        logger.info(f"Loaded MultiHop-RAG: {len(documents)} docs, {len(questions)} questions")
+        return documents, questions
+    
+    def _load_ragqa(self, split: str, max_samples: Optional[int]) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Load RAG-QA dataset.
+        
+        Synthetic QA pairs with Wikipedia context.
+        """
+        ragqa_file = self.data_dir / "ragqa" / f"{split}.json"
+        
+        if not ragqa_file.exists():
+            logger.warning(f"RAG-QA not found: {ragqa_file}")
+            return self._create_dummy_dataset("ragqa", max_samples or 50)
+        
+        with open(ragqa_file) as f:
+            data = json.load(f)
+        
+        doc_map = {}
+        questions = []
+        
+        for item in data:
+            if max_samples and len(questions) >= max_samples:
+                break
+            
+            question = {
+                'question_id': item.get('id', f"ragqa_{len(questions)}"),
+                'question': item['question'],
+                'answer': item['answer']
+            }
+            questions.append(question)
+            
+            # Extract documents from context
+            for doc in item.get('documents', []):
+                doc_id = doc.get('id', f"ragqa_{len(doc_map)}")
+                if doc_id not in doc_map:
+                    text = doc.get('text', '')
+                    if len(text) > self.max_doc_size:
+                        text = text[:self.max_doc_size]
+                    
+                    doc_map[doc_id] = {
+                        'doc_id': doc_id,
+                        'title': doc.get('title', doc_id),
+                        'text': text
+                    }
+        
+        documents = list(doc_map.values())
+        logger.info(f"Loaded RAG-QA: {len(documents)} docs, {len(questions)} questions")
+        return documents, questions
+    
+    def _load_iclr(self, split: str, max_samples: Optional[int]) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Load ICLR papers dataset.
+        
+        Format: research papers with synthetic QA.
+        """
+        iclr_file = self.data_dir / "iclr" / f"{split}.json"
+        
+        if not iclr_file.exists():
+            logger.warning(f"ICLR not found: {iclr_file}")
+            return self._create_dummy_dataset("iclr", max_samples or 50)
+        
+        with open(iclr_file) as f:
+            data = json.load(f)
+        
+        doc_map = {}
+        questions = []
+        
+        for item in data:
+            if max_samples and len(questions) >= max_samples:
+                break
+            
+            question = {
+                'question_id': item.get('id', f"iclr_{len(questions)}"),
+                'question': item['question'],
+                'answer': item['answer']
+            }
+            questions.append(question)
+            
+            # Each paper is a document
+            paper_id = item.get('paper_id', f"iclr_{len(doc_map)}")
+            if paper_id not in doc_map:
+                # Combine title, abstract, sections
+                text_parts = []
+                if 'title' in item:
+                    text_parts.append(item['title'])
+                if 'abstract' in item:
+                    text_parts.append(item['abstract'])
+                if 'sections' in item:
+                    for section in item['sections']:
+                        text_parts.append(section.get('text', ''))
+                
+                text = ' '.join(text_parts)
+                if len(text) > self.max_doc_size:
+                    text = text[:self.max_doc_size]
+                
+                doc_map[paper_id] = {
+                    'doc_id': paper_id,
+                    'title': item.get('title', paper_id),
+                    'text': text
+                }
+        
+        documents = list(doc_map.values())
+        logger.info(f"Loaded ICLR: {len(documents)} docs, {len(questions)} questions")
+        return documents, questions
+    
+    def _create_dummy_dataset(self, name: str, n_samples: int) -> Tuple[List[Dict], List[Dict]]:
+        """Create dummy dataset for testing when real data unavailable."""
+        logger.warning(f"Creating dummy {name} dataset with {n_samples} samples")
+        
+        documents = [
+            {
+                'doc_id': f"{name}_doc_{i}",
+                'title': f"{name.upper()} Document {i}",
+                'text': f"This is a sample document {i} for {name} dataset. " * 20
+            }
+            for i in range(min(50, n_samples * 2))
+        ]
+        
+        questions = [
+            {
+                'question_id': f"{name}_q_{i}",
+                'question': f"What is the content of document {i % len(documents)} in {name}?",
+                'answer': f"Sample answer {i}"
+            }
+            for i in range(n_samples)
+        ]
+        
+        return documents, questions
