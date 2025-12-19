@@ -8,14 +8,22 @@ import logging
 import os
 import numpy as np
 from typing import List, Dict, Any
-
+from pathlib import Path
 try:
     from zai import ZhipuAiClient
 except ImportError:
     raise ImportError("zai library is required. Install with: pip install zai")
 
 logger = logging.getLogger(__name__)
+from dotenv import load_dotenv
 
+# Load environment variables from .env file
+env_path = Path(__file__).parent.parent.parent /'config'/'.env'
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"Loaded environment from {env_path}")
+else:
+    print(f"Warning: .env file not found at {env_path}")
 
 class EmbeddingEncoder:
     """

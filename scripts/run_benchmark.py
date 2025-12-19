@@ -41,7 +41,8 @@ from src.retrieval.graphrag_sota import GraphRAGSOTA
 from src.retrieval.node_rag_sota import NodeRAGSOTA
 from src.retrieval.lightrag_sota import LightRAGSOTA
 from src.link_prediction.heuristics import LinkPredictionHeuristics
-from src.link_prediction.placeholder import CH3L3Predictor
+from src.link_prediction.hybrid_ch3l3 import CH3L3Predictor
+# from src.link_prediction.placeholder import CH3L3Predictor
 from src.evaluation.benchmark import RAGBenchmark
 from src.graph.builder import GraphBuilder
 from src.utils.logger import setup_logger
@@ -136,7 +137,8 @@ def build_chunk_query_graph_if_needed(
     chunk_query_graph = graph_builder.build_chunk_query_graph(
         chunk_graph=chunk_graph,
         synthetic_queries=generated_queries,
-        query_embeddings=query_embeddings
+        query_embeddings=query_embeddings,
+        encoder=encoder   # ensure builder can re-encode / align dims if needed
     )
 
     synthetic_path.parent.mkdir(parents=True, exist_ok=True)
@@ -281,9 +283,12 @@ def main():
     if 'lp_rag' in args.methods:
         logger.info("Initializing LP-RAG...")
         # Use common neighbors as link predictor
-        link_predictor = LinkPredictionHeuristics(
-            method=config['link_prediction']['method'],
-            normalize=config['link_prediction']['normalize_scores']
+        # link_predictor = LinkPredictionHeuristics(
+        #     method=config['link_prediction']['method'],
+        #     normalize=config['link_prediction']['normalize_scores']
+        # )
+        link_predictor = CH3L3Predictor(
+            config=config
         )
         lprag = LPRAG(config, encoder, llm_client, link_predictor)
         idx_time = timed_index(lprag, 'lp_rag', graph_override=chunk_query_graph)
