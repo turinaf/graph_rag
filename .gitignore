@@ -10,3 +10,4 @@ data/
 *.env
 *.log
 *.fish
+logs/
